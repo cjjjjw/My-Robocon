@@ -32,11 +32,12 @@ class Judgment:
             if 0 in self.force:
                 index, min_x = self.min_choice(np.array(self.force))
                 return int(index[0]), int(min_x)
-        # 其次首先拦截第一层
         if 0 in self.state[-1]:
-            return self.step1(np.array(self.state[-1]))
-        elif 0 in self.state[-2]:
-            return self.step2()
+            # 其次首先拦截第一层是自己方的球
+            # 其次拦截第一层
+            return self.step2_best()
+        elif 0 in self.state[-1]:
+            return self.step2_better()
         else:
             # 当第二层没有了，开始拦截第三层
             return self.step3(np.array(self.state[-3]))
@@ -44,32 +45,39 @@ class Judgment:
     def step1(self, state_row):
         # 第一层做一个最近点的放入
         # print('step1')
-        index,min_x = self.min_choice(state_row)
+        index, min_x = self.min_choice(state_row)
         return int(index[0]), int(min_x)
 
-    def step2(self):
+    def step2_best(self):
         # print('step2')
         # 直接做一个状态检测
-        min_x, min_x_ = np.Inf, np.Inf
+        min_x_ = np.Inf
         target_best_index = None
-        target_better_index = None
         for i in range(len(self.state[0])):
             if self.state[1][i] == 0 and self.state[2][i] == self.color:
-                if self.x_coordinate[i] < min_x:
-                    min_x = self.x_coordinate[i]
-                    target_best_index = i
-            elif self.state[1][i] == 0:
                 if self.x_coordinate[i] < min_x_:
                     min_x_ = self.x_coordinate[i]
-                    target_better_index = i
-        if target_best_index is not None:
-            return target_best_index,min_x_
+                    # 最好的情况是，二层下方是自己的球
+                    target_best_index = i
+        if target_best_index is not  None:
+            return target_best_index, min_x_
         else:
-            return target_better_index,min_x
+            return self.step1(np.array(self.state[-1]))
+
+    def step2_better(self):
+        min_x = np.Inf
+        target_better_index = None
+        for i in range(len(self.state[0])):
+            if self.state[1][i] == 0:
+                if self.x_coordinate[i] < min_x:
+                    min_x = self.x_coordinate[i]
+                    # 次好的情况是，二层完成放置
+                    target_better_index = i
+        return target_better_index, min_x
 
     def step3(self, state_row):
         # print('step3')
-        index,min_x = self.min_choice(state_row)
+        index, min_x = self.min_choice(state_row)
         return int(index[0]), int(min_x)
 
     def min_choice(self, state_row):
@@ -77,9 +85,10 @@ class Judgment:
         # 返回一个最近距离，且是空框的索引坐标
         # print(state_row)
         # print(np.where(state_row == 0))
+        # print(self.x_coordinate[np.where(state_row == 0)])
         min_x_coord = np.min(self.x_coordinate[np.where(state_row == 0)])
         min_index = np.where(self.x_coordinate == min_x_coord)
-        return min_index,min_x_coord
+        return min_index, min_x_coord
 
 
 if __name__ == "__main__":

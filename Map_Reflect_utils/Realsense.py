@@ -5,17 +5,24 @@ import random
 
 
 class realsense(object):
-    def __init__(self):
+    def __init__(self, num=0):
         self.pipeline = rs.pipeline()
         self.config = rs.config()
+        print(num)
+        ctx = rs.context()
+        serial_rs = ctx.devices[num].get_info(rs.camera_info.serial_number)
+        self.config.enable_device(serial_rs)
+        self.width, self.height = int(), int()
 
     def cam_init(self, ppi=640):
         if ppi == 1080:
             self.config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
             self.config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+            self.width, self.height = 1080, 720
         else:
             self.config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 60)
             self.config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 60)
+            self.width, self.height = 640, 480
         self.pipeline.start(self.config)  # 流程开始
         align_to = rs.stream.color  # 与color流对齐
         align = rs.align(align_to)
@@ -37,13 +44,15 @@ class realsense(object):
         return color_image.astype(np.uint8), depth_colormap.astype(np.uint8), depth_intrin, aligned_depth_frame
 
     # deal with depth frame data
-    def depth_to_data(self, depth_intrin, aligned_depth_frame, mid_pos, min_val):
+    def depth_to_data(self, depth_intrin, aligned_depth_frame, mid_pos, min_val=20):
         distance_list = []
         # print(box,)
         randnum = 80
         for i in range(randnum):
             bias = random.randint(-min_val // 20, min_val // 20)
-            dist = aligned_depth_frame.get_distance(int(mid_pos[0] + bias), int(mid_pos[1] + bias))
+            pos1, pos2 = int(mid_pos[0] + bias), int(mid_pos[1] + bias)
+            dist = aligned_depth_frame.get_distance(pos1 if pos1 < self.width else self.width,
+                                                    pos2 if pos2 < self.height else self.height)
             if dist:
                 distance_list.append(dist)
                 if np.var(distance_list) > 3:  # 添加方差，以至于不会造成值突变
@@ -76,7 +85,6 @@ if __name__ == "__main__":
         mid_pos = (int(color_image.shape[1] / 2) + 50, int(color_image.shape[0] / 2))
 
         x, y, z = real.depth_to_data(depth_intrin, aligned_depth_frame, mid_pos, 20)
-        cv2.putText(images_real,f"{round(x,3)}m",mid_pos,cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),2)
         cv2.circle(images_real, mid_pos, 2, (0, 255, 0), 2)
         cv2.imshow("real", images_real)
         print("y=%.2f m" % y)

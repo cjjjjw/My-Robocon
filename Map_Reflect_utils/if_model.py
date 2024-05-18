@@ -3,12 +3,13 @@ from collections import deque
 
 
 class Judgment:
-    def __init__(self, x_coordinate: np.ndarray, now_state: np.ndarray, color_code) -> int():
+    def __init__(self, x_coordinate: np.ndarray, now_state: np.ndarray, color_code, power=False):
         self.state = now_state
         # 做一个x坐标的居中处理，去靠近最近的坐标
         self.x_coordinate = x_coordinate
         self.color = color_code
         self.force = [0, 0, 0, 0, 0]
+        self.power = power
 
     # 第一层的抉择
     def main_decision(self):
@@ -32,15 +33,26 @@ class Judgment:
             if 0 in self.force:
                 index, min_x = self.min_choice(np.array(self.force))
                 return int(index[0]), int(min_x)
-        if 0 in self.state[-1]:
-            # 其次首先拦截第一层是自己方的球
-            # 其次拦截第一层
-            return self.step2_best()
-        elif 0 in self.state[-1]:
-            return self.step2_better()
-        else:
-            # 当第二层没有了，开始拦截第三层
-            return self.step3(np.array(self.state[-3]))
+
+        if self.power:  # 当我方实力更强，则使用策略一快速将球填满
+            if 0 in self.state[-1] or 0 in self.state[-2]:
+                # 首先拦截第一层是自己方的球
+                # 其次拦截第一层
+                # 第一层满了，在开始拦截第二层
+                return self.step2_best()
+            else:
+                # 当第二层没有了，开始拦截第三层
+                return self.step3(np.array(self.state[-3]))
+
+        elif not self.power:
+            if 0 in self.state[-1]:
+                # 首先拦截第一层
+                return self.step1(np.array(self.state[-1]))
+            elif 0 in self.state[-2]:
+                return self.step2_best()
+            else:
+                # 当第二层没有了，开始拦截第三层
+                return self.step3(np.array(self.state[-3]))
 
     def step1(self, state_row):
         # 第一层做一个最近点的放入
@@ -59,10 +71,13 @@ class Judgment:
                     min_x_ = self.x_coordinate[i]
                     # 最好的情况是，二层下方是自己的球
                     target_best_index = i
-        if target_best_index is not  None:
+        if target_best_index is not None:
             return target_best_index, min_x_
         else:
-            return self.step1(np.array(self.state[-1]))
+            if 0 in self.state[-1]:
+                return self.step1(np.array(self.state[-1]))
+            else:
+                return self.step2_better()
 
     def step2_better(self):
         min_x = np.Inf

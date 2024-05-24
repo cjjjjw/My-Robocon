@@ -6,6 +6,7 @@ from utils_track import vino as ov
 from collections import deque
 import multiprocessing
 from Map_Reflect_utils import if_model, Map_Reflect, Realsense
+import serial.tools.list_ports as ser_list
 from numba import jit
 import logging
 import serial
@@ -49,7 +50,7 @@ def round_int(nums: int, n: int):
 
 
 @jit(nopython=True)
-def accle_for_Y(detections, Y_max=600, Y_min=250):
+def accle_for_Y(detections, Y_max=520, Y_min=180):
     detections_ = []
     for i in range(len(detections)):
         Y = detections[i][1]  # 获取Y
@@ -60,7 +61,7 @@ def accle_for_Y(detections, Y_max=600, Y_min=250):
 
 
 @jit(nopython=True)
-def accle_for_depth(detections, depth_max=0.5, depth_min=0):
+def accle_for_depth(detections, depth_max=0.70, depth_min=0.4):
     detections_ = []
     for i in range(len(detections)):
         depth = detections[i][4]  # 获取depth
@@ -71,7 +72,7 @@ def accle_for_depth(detections, depth_max=0.5, depth_min=0):
 
 
 @jit(nopython=True)
-def accle_for_X(detections, X_max=350, X_min=250):
+def accle_for_X(detections, X_max=320, X_min=130):
     detections_ = []
     for i in range(len(detections)):
         X = detections[i][0]  # 获取depth
@@ -82,9 +83,9 @@ def accle_for_X(detections, X_max=350, X_min=250):
 
 
 def total_get(detections):
-    # detections = np.array(accle_for_Y(detections))
+    detections = np.array(accle_for_Y(detections))
     detections = np.array(accle_for_depth(detections))
-    # detections = np.array(accle_for_X(detections))
+    detections = np.array(accle_for_X(detections))
     return np.array(detections)
 
 
@@ -101,31 +102,55 @@ def ser_open(port0="/dev/ttyUSB2"):
 
 def Receiver(queue1):
     try:
-        ret, ser2 = ser_open("/dev/ttyACM0")
+        ret, ser2 = ser_open("/dev/ttyUSB0")
+        time.sleep(0.01)  # 每次打开串口需要延迟几毫米
         while ret:
-            ser2.reset_input_buffer()  # 清除输入缓冲区
-            recv = ser2.read(3)  # 读取数据并将数据存入recv
-            # print(recv)
-            if recv[0] == 0xaa and recv[1] == 0xbb:
-                queue1.put(recv[2])
+            if ser2.in_waiting:
+                ser2.reset_input_buffer()
+                recv = ser2.read(3)  # 读取数据并将数据存入recv
+                # print(recv)
+                if recv[0] == 0xaa and recv[1] == 0xbb:
+                    queue1.put(recv[2])
+            else:
+                # if not exist data,close ser2 right now
+                for i in range(len(ser_list.comports())):
+                    logger.info("Receiver ser change")
+                    ser2.reset_input_buffer()
+                    ret, ser2 = ser_open(f"/dev/ttyUSB{i}")
+                    time.sleep(0.01)  # 每次打开串口需要延迟几毫米
+                    if ser2.in_waiting:  # 读取到信息后保留这个串口
+                        break
+            # clean all data , avoid data receive stop all process
+
     except:
         logger.info(f"Receiver ser is Died")
 
 
 def Sender(queue2):
     # 提前设立好该发送的信号，当检测到状态跳变，在改变
-
     try:
         ret, ser1 = ser_open("/dev/ttyUSB0")
+        time.sleep(0.01)  # 每次打开串口需要延迟几毫米
         while ret:
-            ser1.reset_input_buffer()  # 清除输入缓冲区
-            # print(queue2.get())
-            ser1.write(queue2.get())
+            if not ser1.in_waiting:
+                # print(queue2.get())
+                ser1.reset_input_buffer()
+                ser1.write(queue2.get())
+            else:
+                for i in range(len(ser_list.comports())):
+                    logger.info("Sender ser change")
+                    ser1.reset_input_buffer()
+                    ret, ser1 = ser_open(f"/dev/ttyUSB{i}")
+                    time.sleep(0.01)  # 每次打开串口需要延迟几毫米
+                    if not ser1.in_waiting:  # 读取到信息后保留这个串口
+                        break
+            # clean all data , avoid data receive stop all process
+
     except:
         logger.info(f"Sender ser is Died")
 
 
-def FUCKING(share_var, queue, code, Receiver_queue, Sender_queue):
+def FUCKING(share_var, queue, code, Receiver_queue, Sender_queue, power):
     # 先进行按列排序
     env = Map_Reflect.State()
     env.map_init(False)  # 地图启动
@@ -144,10 +169,10 @@ def FUCKING(share_var, queue, code, Receiver_queue, Sender_queue):
         # 打开管道接收数据，初始化
         Final_clusters = [0, 0, 0]
         # 先做第一个球的位置计算
-        action_best, min_x_best = model(x_coordinate, env.observation, code, False).main_decision()
+        action_best, min_x_best = model(x_coordinate, env.observation, code, power).main_decision()
         next_state, _, _ = env.step(action_best, 2)
         try:
-            action_better, min_x_better = model(x_coordinate, next_state, code, False).main_decision()
+            action_better, min_x_better = model(x_coordinate, next_state, code, power).main_decision()
             next_state, _, _ = env.step(action_better, 3)
             share_var['Better'] = action_better
         except Exception:
@@ -156,16 +181,16 @@ def FUCKING(share_var, queue, code, Receiver_queue, Sender_queue):
         share_var['Reflect_img'] = env.map
         env.map_reset()  # 清除图表，避免溢出
         # 先传输移动命令到，下位机ser.send(best_action)
-
-        print(now_detect_flag, " now_target")
-        print(input_detect_flag, "last_target")
+        # print(now_detect_flag, " now_target")
+        # print(input_detect_flag, "last_target")
+        # if not Receiver_queue.empty():
         set_flag = Receiver_queue.get()
         if not now_detect_flag and input_detect_flag and set_flag == 1:
+            # print(str(f"5A{action_best}{1}00000000000000"), "放球")
             Sender_queue.put(str(f"5A{action_best}{1}00000000000000").encode("gbk"))
         else:
-            print(str(f"5A{action_best}{0}00000000000000"))
+            # print(str(f"5A{action_best}{0}00000000000000"), "不放球")
             Sender_queue.put(str(f"5A{action_best}{0}00000000000000").encode("gbk"))
-
         # print(set_flag, " send")
         # print(last_ser, "ser")
         # 当发生框检验，则发生一次状态记录
@@ -176,7 +201,6 @@ def FUCKING(share_var, queue, code, Receiver_queue, Sender_queue):
                 upgrade_state, _, _ = env.step(action_best, code)
                 env.reflect(upgrade_state)
                 observation_reflect = upgrade_state.T
-
         # if not queue.empty():
         now_detect_flag = False  # 框检验位，重新设置为0
         mediator_dict = queue.get()
@@ -188,11 +212,13 @@ def FUCKING(share_var, queue, code, Receiver_queue, Sender_queue):
             del Final_clusters[-len(clusters_):]
             Final_clusters[len(Final_clusters):] = clusters_
         except:
-            logger.info("NO Ball")
+            # logger.info("NO Ball")
+            pass
         # 一直更新最佳位置，但是却不是释放放球的命令
         # 当发生反转信号，set_flag==1，last_ser==0，则发生一次状态记录
         if set_flag == 1 and last_ser != 1:
             # 当确认到达后，才开始计算是否放入
+            print(Final_clusters, "cluster")
             Final_clusters_ = np.array(Final_clusters)
             observation_reflect[action_best] = Final_clusters_
             last_best = action_best
@@ -240,12 +266,14 @@ class Track(object):
         cap = realsense_cap.cam_init(640)
         # 打开管道接收数据
         while True:
+            start = time.time()
             self.mediator_dict["ball_deque_coord"] = deque()
             color_image, depth_colormap, depth_intrin, aligned_depth_frame = realsense_cap.cam_run(cap)
             # 将图片旋转90度进行判断
             frame = cv2.rotate(color_image, cv2.ROTATE_90_CLOCKWISE)
             # copy to become another image
             # 当接收到到达的信息时才开始，进行识别
+            cv2.rectangle(frame, (130, 180), (320, 520), (255, 0, 0), 3)
             if not Receiver_queue.empty():
                 set_flag = Receiver_queue.get()
                 if set_flag == 1:  # 当串口标志位发生变化的时候，才开始进行识别
@@ -255,15 +283,15 @@ class Track(object):
                             mid_pos = [int((xyxy[0] + xyxy[2]) / 2),
                                        int((xyxy[1] + xyxy[3]) / 2)]
                             cv2.circle(frame, mid_pos, 1, (255, 0, 0), 3)  # 圆心
-                            # cv2.putText(im0, f"{mid_pos}", mid_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                            # cv2.putText(frame, f"{mid_pos}", mid_pos, cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
                             # 由于识别的时候将画面转移了90°，为了对齐深度的像素，需要将像素逆变换回去，才能拿
                             target_width, target_height = abs(int(xyxy[2] - xyxy[0])), abs(int(xyxy[3] - xyxy[1]))
                             min_val = min(target_width, target_height)  # 通过识别框的大小确定一个深度范围
                             z, y, x = realsense_cap.depth_to_data(depth_intrin, aligned_depth_frame,
                                                                   (mid_pos[-1], realsense_cap.height - mid_pos[-2]),
                                                                   min_val)
-                            cv2.putText(frame, f"{round(x, 2)}, {round(y, 2)}, {round(z, 2)}", mid_pos,
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                            cv2.putText(frame, f"{round(z, 2)}", mid_pos,
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
                             if cls == 0:
                                 self.mediator_dict["ball_deque_coord"].append(
                                     [*mid_pos, target_width, target_height, round(z, 2), int(redcode)])
@@ -272,6 +300,9 @@ class Track(object):
                                     [*mid_pos, target_width, target_height, round(z, 2), int(bluecode)])
             queue.put(self.mediator_dict)
             # 以下是向外输送
+            end = time.time()
+            fps = 1 / (end - start)
+            cv2.putText(frame, f"{round(fps, 1)}", (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 0, 0), 2)
             self.share_data["Reflect_data"] = Reflect_data
             self.share_data["im0"] = frame
 
@@ -284,9 +315,9 @@ class Track(object):
         parser.add_argument('--weights_path', nargs='+', type=str,
                             default="/home/nuc2/PycharmProjects/yolov5-master/weights/bestBallll.bin",
                             help='weights path or triton URL')
-        parser.add_argument('--conf-thres', type=float, default=0.8, help='confidence threshold')
+        parser.add_argument('--conf-thres', type=float, default=0.40, help='confidence threshold')
         parser.add_argument('--line-thickness', default=3, type=int, help='bounding box thickness (pixels)')
-        parser.add_argument('--iou-thres', type=float, default=0.55, help='NMS IoU threshold')
+        parser.add_argument('--iou-thres', type=float, default=0.45, help='NMS IoU threshold')
         parser.add_argument('--classes', type=list, default=[], help='Classes')
         parser.add_argument('--img-size', type=int, default=736, help='img-size')
         parser.add_argument('--device', default='GPU', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
@@ -298,12 +329,12 @@ class Track(object):
         return opt
 
     # start function
-    def main(self, shareVar, code=bluecode):
+    def main(self, shareVar, code=bluecode, power=False):
         global queue, Reflect_data, Receiver_queue
         Reflect_data = multiprocessing.Manager().dict()
         # 初始化赋值["Best_ROI"],Reflect_data["Best_ROI"]避免先启动读不到数据
         # share_var['Best_track']
-        queue = multiprocessing.Manager().Queue(maxsize=4)
+        queue = multiprocessing.Manager().Queue(maxsize=1)
         Reflect_data["Best"], Reflect_data["Better"], Reflect_data["ball_deque_coord"] = None, None, deque()
         Receiver_queue = multiprocessing.Manager().Queue(maxsize=4)
         Sender_queue = multiprocessing.Manager().Queue(maxsize=4)
@@ -314,7 +345,8 @@ class Track(object):
         del vars(opt)["source"]
         model = ov.Vino(**vars(opt))
         # 启动进程
-        p1 = multiprocessing.Process(target=FUCKING, args=(Reflect_data, queue, code, Receiver_queue, Sender_queue))
+        p1 = multiprocessing.Process(target=FUCKING,
+                                     args=(Reflect_data, queue, code, Receiver_queue, Sender_queue, power))
         p2 = multiprocessing.Process(target=Receiver, args=(Receiver_queue,))
         p3 = multiprocessing.Process(target=Sender, args=(Sender_queue,))
         p2.start()

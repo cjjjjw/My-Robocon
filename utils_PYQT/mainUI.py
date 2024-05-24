@@ -1,22 +1,28 @@
+"""
+brief :Editor cjh
+"""
 import sys
-import time
+
+sys.path.append("/home/nuc2/PycharmProjects/yolov5-master")
+import BucketTime_Reflect_vino
+
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import *
 from uiPython.mainWindow import Ui_mainwindow
 from uiPython.BucketTime import Ui_BucketTime
-import BucketTime_Reflect
-from Map_Reflect_utils import Map_Reflect
 import multiprocessing
 import cv2
 import sys
 import os
 import signal
-import psutil
+
+bluecode = 1.0
+redcode = -1.0
 
 _translate = QtCore.QCoreApplication.translate
 
 
-def p1_start():
+def p1_start(code):
     global t_1
     # 切换川口的同时开始创建一个新的进程，在新的经常中调用32
     t_1 = multiprocessing.Process(target=track.main, args=(share_data,))
@@ -65,7 +71,14 @@ class Main_Window(QWidget, Ui_mainwindow):
         self.pushButton.clicked.connect(self.close)
 
     def go_to_Bucket(self):
-        p1_start()
+        # bule 打开
+        global code
+        if self.radioButton.isChecked():
+            code = bluecode
+        # red 打开
+        elif self.radioButton_2.isChecked():
+            code = redcode
+        p1_start(code)
         self.switch_window_main.emit()
 
 
@@ -133,7 +146,8 @@ class Bucket_Window(QWidget, Ui_BucketTime):
         try:
             # 依次关闭所有进程
             print("close other process")
-            for pid_ in psutil.pids():
+            for pid_ in share_data['pid']:
+                print(pid_)
                 os.kill(pid_, signal.SIGTERM)
         except Exception:
             pass
@@ -143,19 +157,21 @@ class Bucket_Window(QWidget, Ui_BucketTime):
     def Restart(self):
         try:
             print("close other process")
-            for pid_ in psutil.pids():
+            for pid_ in share_data['pid']:
+                print(pid_)
                 os.kill(pid_, signal.SIGTERM)
         except Exception:
             print("NO other Process")
         os.kill(t_1.pid, signal.SIGTERM)
-        p1_start()
+        p1_start(code)
         self.track_init()
 
 
 def main():
+    # sys.exit()
     global track, share_data
     share_data = multiprocessing.Manager().dict()
-    track = BucketTime_Reflect.Track()
+    track = BucketTime_Reflect_vino.Track()
     app = QtWidgets.QApplication(sys.argv)
     main_Controller = Main_Controller()  # 控制器实例
     main_Controller.mainWindow()  # 默认展示的是 hello 页面

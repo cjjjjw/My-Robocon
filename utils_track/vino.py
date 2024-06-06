@@ -146,9 +146,9 @@ class Vino(Colors):
             ppp.output(0).tensor().set_element_type(ov.Type.f32)
             _model = ppp.build()
             # 加载模型，可用CPU or GPU
-            compilemodel = core.compile_model(model, self.device)
+            compile_model_ = core.compile_model(model, self.device)
             # 推理结果
-            results = compile_model.create_infer_request()
+            results = compile_model_.create_infer_request()
             self.logger.info("Success to Start")
             return results
         except:

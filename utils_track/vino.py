@@ -148,7 +148,7 @@ class Vino(Colors):
             # 加载模型，可用CPU or GPU
             compilemodel = core.compile_model(model, self.device)
             # 推理结果
-            results = compilemodel.create_infer_request()
+            results = compile_model.create_infer_request()
             self.logger.info("Success to Start")
             return results
         except:
